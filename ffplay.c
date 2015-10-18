@@ -40,6 +40,7 @@
 #include "libavutil/samplefmt.h"
 #include "libavutil/avassert.h"
 #include "libavutil/time.h"
+#include "libavutil/frame.h"
 #include "libavformat/avformat.h"
 #include "libavdevice/avdevice.h"
 #include "libswscale/swscale.h"
@@ -221,10 +222,12 @@ typedef struct VideoState {
     FrameQueue pictq;
     FrameQueue subpq;
     FrameQueue sampq;
+    FrameQueue datapq; // LEON
 
     Decoder auddec;
     Decoder viddec;
     Decoder subdec;
+    Decoder datadec; // LEON
 
     int viddec_width;
     int viddec_height;
@@ -283,6 +286,12 @@ typedef struct VideoState {
     AVStream *video_st;
     PacketQueue videoq;
     double max_frame_duration;      // maximum duration of a frame - above this, we consider the jump a timestamp discontinuity
+
+    // LEON
+    int* data_stream;
+    AVStream **data_st;
+    PacketQueue dataq;
+
 #if !CONFIG_AVFILTER
     struct SwsContext *img_convert_ctx;
 #endif
@@ -362,6 +371,36 @@ static AVPacket flush_pkt;
 #define FF_QUIT_EVENT    (SDL_USEREVENT + 2)
 
 static SDL_Surface *screen;
+
+// IDAN
+typedef struct {
+    //uint8_t *data[AV_NUM_DATA_POINTERS];
+    uint8_t **data;
+    int width;
+    int height;
+    int type;
+    //int linesize[AV_NUM_DATA_POINTERS];
+    int *linesize;
+} MyFrame;
+int entryPoint(int argc, char **argv, int is_leon, int show_video);
+typedef void (*data_clbk_ptr)(uint8_t service_id, int64_t pts, char *arr, int arr_size);
+typedef void (*frame_clbk_ptr)(int64_t pts, MyFrame* frame);
+typedef void (*mouse_click_clbk_ptr)(uint16_t x, uint16_t y, uint8_t button);
+data_clbk_ptr metadata_callback;
+frame_clbk_ptr frame_callback;
+mouse_click_clbk_ptr mouse_callback;
+int stabbedX, stabbedY;
+#define SDL_MY_QUIT 100
+#define FFPLAY_WRAPPER_API
+#define __stdcall
+#define __cdecl
+FFPLAY_WRAPPER_API void __stdcall start(int argc, char** argv, int show_video);
+FFPLAY_WRAPPER_API void __stdcall close(void);
+FFPLAY_WRAPPER_API void __cdecl set_data_callback_func(data_clbk_ptr callback_func);
+FFPLAY_WRAPPER_API void __cdecl set_frame_callback_func(frame_clbk_ptr frame_callback_func);
+FFPLAY_WRAPPER_API void __cdecl set_mouse_click_callback_func(mouse_click_clbk_ptr mouse_click_callback_func);
+FFPLAY_WRAPPER_API void __stdcall load(void);
+FFPLAY_WRAPPER_API void __stdcall stab_pixel(int x, int y);
 
 #if CONFIG_AVFILTER
 static int opt_add_vfilter(void *optctx, const char *opt, const char *arg)
@@ -616,6 +655,9 @@ static int decoder_decode_frame(Decoder *d, AVFrame *frame, AVSubtitle *sub) {
                 break;
             case AVMEDIA_TYPE_SUBTITLE:
                 ret = avcodec_decode_subtitle2(d->avctx, sub, &got_frame, &d->pkt_temp);
+                break;
+            case AVMEDIA_TYPE_DATA: // LEON
+                got_frame = 1;
                 break;
         }
 
@@ -1166,6 +1208,10 @@ static void stream_component_close(VideoState *is, int stream_index)
         decoder_abort(&is->subdec, &is->subpq);
         decoder_destroy(&is->subdec);
         break;
+    case AVMEDIA_TYPE_DATA: // LEON
+        decoder_abort(&is->datadec, &is->datapq);
+        decoder_destroy(&is->datadec);
+        break;
     default:
         break;
     }
@@ -1184,6 +1230,11 @@ static void stream_component_close(VideoState *is, int stream_index)
     case AVMEDIA_TYPE_SUBTITLE:
         is->subtitle_st = NULL;
         is->subtitle_stream = -1;
+        break;
+    case AVMEDIA_TYPE_DATA: // LEON
+        is->data_st = NULL;
+        free(is->data_stream);
+        is->data_stream = NULL;
         break;
     default:
         break;
@@ -1204,16 +1255,25 @@ static void stream_close(VideoState *is)
     if (is->subtitle_stream >= 0)
         stream_component_close(is, is->subtitle_stream);
 
+    for (int i = 0; i < is->ic->nb_streams; i++) { // LEON
+		if (is->data_stream[i] != -1) {
+			stream_component_close(is, i);
+			break;
+		}
+	}
+
     avformat_close_input(&is->ic);
 
     packet_queue_destroy(&is->videoq);
     packet_queue_destroy(&is->audioq);
     packet_queue_destroy(&is->subtitleq);
+    packet_queue_destroy(&is->dataq); // LEON
 
     /* free all pictures */
     frame_queue_destory(&is->pictq);
     frame_queue_destory(&is->sampq);
     frame_queue_destory(&is->subpq);
+    frame_queue_destory(&is->datapq); // LEON
     SDL_DestroyCond(is->continue_read_thread);
 #if !CONFIG_AVFILTER
     sws_freeContext(is->img_convert_ctx);
@@ -1223,7 +1283,7 @@ static void stream_close(VideoState *is)
     av_free(is);
 }
 
-static void do_exit(VideoState *is)
+static void my_do_exit(VideoState *is, int is_leon)
 {
     if (is) {
         stream_close(is);
@@ -1236,9 +1296,24 @@ static void do_exit(VideoState *is)
     avformat_network_deinit();
     if (show_status)
         printf("\n");
+    if (is_leon) // LEON
+        SDL_VideoQuit();
     SDL_Quit();
     av_log(NULL, AV_LOG_QUIET, "%s", "");
-    exit(0);
+
+    if (is_leon) { // LEON
+        display_disable = 0;
+        screen = NULL;
+        window_title = NULL;
+    }
+
+    // exit(0); // LEON
+}
+
+// LEON
+static void do_exit(VideoState *is)
+{
+    my_do_exit(is, /*is_leon=*/0);
 }
 
 static void sigterm_handler(int sig)
@@ -1271,6 +1346,9 @@ static int video_open(VideoState *is, int force_set_video_mode, Frame *vp)
     } else if (!is_full_screen && screen_width) {
         w = screen_width;
         h = screen_height;
+    } else if (vp) { // LEON
+        w = vp->width;
+        h = vp->height;
     } else {
         w = default_width;
         h = default_height;
@@ -2234,6 +2312,34 @@ static int video_thread(void *arg)
             frame_rate = filt_out->inputs[0]->frame_rate;
         }
 
+        if (frame_callback != NULL) {
+			// LEON
+			MyFrame* myframe = (MyFrame*)malloc(sizeof(MyFrame));
+			myframe->data = frame->data;
+			myframe->height = frame->height;
+			myframe->width = frame->width;
+			myframe->type = frame->format;
+			myframe->linesize = frame->linesize;
+			frame_callback(frame->pts, myframe);
+
+			free(myframe);
+		}
+
+		// LEON
+		if (frame != NULL && stabbedX > 0 && stabbedX < frame->width-1 && stabbedY > 0 && stabbedY < frame->height-1) {
+			int stabSize = 10;
+			for (int i = 0 ; i < stabSize ; i++) {
+				for (int j = 0; j < stabSize; j++) {
+					frame->data[0][stabbedX + j + frame->linesize[0] * (stabbedY + i)] = 115;
+
+					if (j % 2 == 1 && i % 2 == 1) {
+						frame->data[1][(stabbedX + j - frame->linesize[1] + frame->linesize[1] * (stabbedY + i)) / 2] = 90;
+						frame->data[2][(stabbedX + j - frame->linesize[2] + frame->linesize[2] * (stabbedY + i)) / 2] = 223;
+					}
+				}
+			}
+		}
+
         ret = av_buffersrc_add_frame(filt_in, frame);
         if (ret < 0)
             goto the_end;
@@ -2342,6 +2448,88 @@ static int subtitle_thread(void *arg)
         }
     }
     return 0;
+}
+
+// LEON
+static int data_thread(void *arg)
+{
+	VideoState *is = arg;
+	Decoder* decoder = &is->datadec;
+	int got_data;
+	AVPacket* mpkt;
+
+	int		counter = 0;
+	int		pos = 0;
+	char*	arr = NULL;
+
+	for (;;) {
+
+		if ((got_data = decoder_decode_frame(&is->datadec, NULL, NULL)) < 0)
+			break;
+
+
+		mpkt = &decoder->pkt_temp;
+
+		if (mpkt == NULL)
+			continue ;
+
+		//printf("%d \t %u \n", mpkt->stream_index, (unsigned long)mpkt->pts);
+
+		counter = 0;
+		pos = 0;
+		arr = NULL;
+		// calculating the size of the data without the au_cells
+		while (pos < mpkt->size)
+		{
+			int sec = *(short*)(mpkt->data + pos + 3);
+			counter += sec;
+			pos += 5 + sec;
+		}
+
+
+		// copying only the data to arr
+		if (counter)
+		{
+			int arr_size = counter;
+            int service_id = mpkt->data[0];
+            arr_size = counter;
+			arr = malloc(arr_size);
+
+			pos = 0;
+			counter = 0;
+
+			while (pos < mpkt->size)
+			{
+				unsigned short sec = *(unsigned short*)(mpkt->data + pos + 3);
+
+				memcpy((arr + counter), (mpkt->data + pos + 5), sec);
+
+				counter += sec;
+				pos += 5 + sec;
+			}
+
+			if (metadata_callback != NULL)
+				metadata_callback(service_id, mpkt->pts, arr, arr_size);
+
+			//printf("%u \n", is->ic->streams[mpkt->stream_index]->id); // SERVICE ID
+			//s_metadata_callback_func(metadata_service_id, p_block->i_pts, arr, counter);
+
+			free(arr);
+		}
+
+
+		/*
+		const FILE* f = fopen("exi0", "wb");
+
+		fwrite(mpkt->data, 1, mpkt->size, f);
+
+		fclose(f);
+		*/
+		/*if (packet_queue_get(&is->datadec.queue, &mpkt, 1, ((Decoder*)&is->datadec)->pkt_serial) < 0)
+			return -1;*/
+
+	}
+	return 0;
 }
 
 /* copy samples for viewing in editor window */
@@ -2642,6 +2830,8 @@ static int audio_open(void *opaque, int64_t wanted_channel_layout, int wanted_nb
     return spec.size;
 }
 
+int data_queue_init = 0; // LEON
+
 /* open a given stream. Return 0 if OK */
 static int stream_component_open(VideoState *is, int stream_index)
 {
@@ -2783,6 +2973,14 @@ static int stream_component_open(VideoState *is, int stream_index)
         if ((ret = decoder_start(&is->subdec, subtitle_thread, is)) < 0)
             goto fail;
         break;
+    case AVMEDIA_TYPE_DATA: // LEON
+		is->data_stream[stream_index] = stream_index;
+		is->data_st[stream_index] = ic->streams[stream_index];
+		if (!data_queue_init) {
+			decoder_init(&is->datadec, avctx, &is->dataq, is->continue_read_thread);
+			decoder_start(&is->datadec, data_thread, is);
+			data_queue_init = 1;
+		}
     default:
         break;
     }
@@ -2958,6 +3156,22 @@ static int read_thread(void *arg)
                                  st_index[AVMEDIA_TYPE_VIDEO]),
                                 NULL, 0);
 
+    // LEON ************
+	is->data_stream = calloc(is->ic->nb_streams, sizeof(int));
+	memset(is->data_stream, -1, is->ic->nb_streams);
+
+	for (int i = 0; i < is->ic->nb_streams; i++) {
+		if (ic->streams[i]->codec->codec_type == AVMEDIA_TYPE_DATA)
+			is->data_stream[i] = i;
+		else
+			is->data_stream[i] = -1;
+    }
+
+	is->data_st = calloc(is->ic->nb_streams, sizeof(AVStream*));
+
+	st_index[AVMEDIA_TYPE_DATA] = av_find_best_stream(ic, AVMEDIA_TYPE_DATA, st_index[AVMEDIA_TYPE_DATA], st_index[AVMEDIA_TYPE_VIDEO], NULL, 0);
+	// *****************
+
     is->show_mode = show_mode;
     if (st_index[AVMEDIA_TYPE_VIDEO] >= 0) {
         AVStream *st = ic->streams[st_index[AVMEDIA_TYPE_VIDEO]];
@@ -2982,6 +3196,15 @@ static int read_thread(void *arg)
     if (st_index[AVMEDIA_TYPE_SUBTITLE] >= 0) {
         stream_component_open(is, st_index[AVMEDIA_TYPE_SUBTITLE]);
     }
+
+    // LEON
+	if (st_index[AVMEDIA_TYPE_DATA] >= 0)
+	{
+		for (int i = 0; i < ic->nb_streams; i++) {
+			if (is->data_stream[i] != -1)
+				ret = stream_component_open(is, i);
+        }
+	}
 
     if (is->video_stream < 0 && is->audio_stream < 0) {
         av_log(NULL, AV_LOG_FATAL, "Failed to open file '%s' or configure filtergraph\n",
@@ -3163,7 +3386,8 @@ static VideoState *stream_open(const char *filename, AVInputFormat *iformat)
 
     if (packet_queue_init(&is->videoq) < 0 ||
         packet_queue_init(&is->audioq) < 0 ||
-        packet_queue_init(&is->subtitleq) < 0)
+        packet_queue_init(&is->subtitleq) < 0 ||
+        packet_queue_init(&is->dataq)) // LEON
         goto fail;
 
     if (!(is->continue_read_thread = SDL_CreateCond())) {
@@ -3344,11 +3568,22 @@ static void event_loop(VideoState *cur_stream)
 {
     SDL_Event event;
     double incr, pos, frac;
+    int exit_flag; // LEON
 
     for (;;) {
         double x;
+
+        // LEON
+        if (exit_flag) {
+            exit_flag = 0;
+            break;
+        }
+
         refresh_loop_wait_event(cur_stream, &event);
         switch (event.type) {
+        case SDL_MY_QUIT: // LEON
+            exit_flag = 1;
+            break;
         case SDL_KEYDOWN:
             if (exit_on_keydown) {
                 do_exit(cur_stream);
@@ -3466,6 +3701,12 @@ static void event_loop(VideoState *cur_stream)
             cur_stream->force_refresh = 1;
             break;
         case SDL_MOUSEBUTTONDOWN:
+
+            // LEON
+            if (mouse_callback != NULL) {
+                mouse_callback(event.button.x, event.button.y, event.button.button);
+            }
+
             if (exit_on_mousedown) {
                 do_exit(cur_stream);
                 break;
@@ -3483,6 +3724,8 @@ static void event_loop(VideoState *cur_stream)
                     break;
                 x = event.motion.x;
             }
+            // LEON disabled no need to seek anywhere
+			/*
                 if (seek_by_bytes || cur_stream->ic->duration <= 0) {
                     uint64_t size =  avio_size(cur_stream->ic->pb);
                     stream_seek(cur_stream, size*x/cur_stream->width, 0, 1);
@@ -3507,6 +3750,7 @@ static void event_loop(VideoState *cur_stream)
                         ts += cur_stream->ic->start_time;
                     stream_seek(cur_stream, ts, 0, 0);
                 }
+            */
             break;
         case SDL_VIDEORESIZE:
                 screen = SDL_SetVideoMode(FFMIN(16383, event.resize.w), event.resize.h, 0,
@@ -3749,7 +3993,7 @@ static int lockmgr(void **mtx, enum AVLockOp op)
 }
 
 /* Called from the main */
-int main(int argc, char **argv)
+int entryPoint(int argc, char **argv, int is_leon, int show_video) // LEON
 {
     int flags;
     VideoState *is;
@@ -3782,12 +4026,18 @@ int main(int argc, char **argv)
         av_log(NULL, AV_LOG_FATAL, "An input file must be specified\n");
         av_log(NULL, AV_LOG_FATAL,
                "Use -h to get full help or, even better, run 'man %s'\n", program_name);
-        exit(1);
+        //exit(1); // LEON
+        return -1; // LEON
     }
 
     if (display_disable) {
         video_disable = 1;
     }
+
+    // LEON
+    if (is_leon)
+        display_disable = !show_video;
+
     flags = SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER;
     if (audio_disable)
         flags &= ~SDL_INIT_AUDIO;
@@ -3799,7 +4049,8 @@ int main(int argc, char **argv)
     if (SDL_Init (flags)) {
         av_log(NULL, AV_LOG_FATAL, "Could not initialize SDL - %s\n", SDL_GetError());
         av_log(NULL, AV_LOG_FATAL, "(Did you set the DISPLAY variable?)\n");
-        exit(1);
+        //exit(1); // LEON
+        return -2; // LEON
     }
 
     if (!display_disable) {
@@ -3816,7 +4067,8 @@ int main(int argc, char **argv)
 
     if (av_lockmgr_register(lockmgr)) {
         av_log(NULL, AV_LOG_FATAL, "Could not initialize lock manager!\n");
-        do_exit(NULL);
+        my_do_exit(NULL, is_leon); // LEON
+        return -3; // LEON
     }
 
     av_init_packet(&flush_pkt);
@@ -3825,12 +4077,57 @@ int main(int argc, char **argv)
     is = stream_open(input_filename, file_iformat);
     if (!is) {
         av_log(NULL, AV_LOG_FATAL, "Failed to initialize VideoState!\n");
-        do_exit(NULL);
+        my_do_exit(NULL, is_leon); // LEON
+        return -4; // LEON
     }
 
     event_loop(is);
+    if (is_leon)
+        my_do_exit(is, is_leon); // LEON
 
     /* never returns */
 
     return 0;
+}
+
+// Idan
+/* Called from the main */
+int main(int argc, char **argv)
+{
+    int returnCode = entryPoint(argc, argv, /*is_leon=*/0, 0);
+    if (returnCode < 0)
+        exit(1);
+
+    return 0;
+}
+
+// ############################### LEON
+FFPLAY_WRAPPER_API void __stdcall start(int argc, char** argv, int show_video) {
+	entryPoint(argc, argv, /*is_leon=*/1, show_video);
+}
+
+FFPLAY_WRAPPER_API void __stdcall close(void) {
+	SDL_Event event;
+	event.type = SDL_MY_QUIT;
+	SDL_PushEvent(&event);
+}
+
+FFPLAY_WRAPPER_API void __cdecl set_data_callback_func(data_clbk_ptr callback_func) {
+	metadata_callback = callback_func;
+}
+
+FFPLAY_WRAPPER_API void __cdecl set_frame_callback_func(frame_clbk_ptr frame_callback_func) {
+	frame_callback = frame_callback_func;
+}
+
+FFPLAY_WRAPPER_API void __cdecl set_mouse_click_callback_func(mouse_click_clbk_ptr mouse_click_callback_func) {
+	mouse_callback = mouse_click_callback_func;
+}
+
+FFPLAY_WRAPPER_API void __stdcall load(void) {
+}
+
+FFPLAY_WRAPPER_API void __stdcall stab_pixel(int x, int y) {
+	stabbedX = x;
+	stabbedY = y;
 }

@@ -644,6 +644,8 @@ static int update_wrap_reference(AVFormatContext *s, AVStream *st, int stream_in
     return 1;
 }
 
+AVPacketList* mypktl; // LEON
+
 int ff_read_packet(AVFormatContext *s, AVPacket *pkt)
 {
     int ret, i, err;
@@ -651,6 +653,7 @@ int ff_read_packet(AVFormatContext *s, AVPacket *pkt)
 
     for (;;) {
         AVPacketList *pktl = s->internal->raw_packet_buffer;
+        mypktl = pktl; // LEON
 
         if (pktl) {
             *pkt = pktl->pkt;

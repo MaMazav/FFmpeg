@@ -530,6 +530,7 @@ OBJS-$(CONFIG_VC1_DECODER)             += vc1dec.o vc1_block.o vc1_loopfilter.o 
                                           wmv2dsp.o
 OBJS-$(CONFIG_VC1_QSV_DECODER)         += qsvdec_vc1.o
 OBJS-$(CONFIG_VCR1_DECODER)            += vcr1.o
+OBJS-$(CONFIG_VIMS_DECODER)            += vims.o
 OBJS-$(CONFIG_VMDAUDIO_DECODER)        += vmdaudio.o
 OBJS-$(CONFIG_VMDVIDEO_DECODER)        += vmdvideo.o
 OBJS-$(CONFIG_VMNC_DECODER)            += vmnc.o

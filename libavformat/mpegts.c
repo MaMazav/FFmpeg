@@ -746,6 +746,7 @@ static const StreamType REGD_types[] = {
 static const StreamType METADATA_types[] = {
     { MKTAG('K','L','V','A'), AVMEDIA_TYPE_DATA, AV_CODEC_ID_SMPTE_KLV },
     { MKTAG('I','D','3',' '), AVMEDIA_TYPE_DATA, AV_CODEC_ID_TIMED_ID3 },
+    { 0x15, AVMEDIA_TYPE_DATA, AV_CODEC_ID_VIMS }, // LEON EXAMPLE
     { 0 },
 };
 
@@ -834,6 +835,8 @@ static int mpegts_set_stream_info(AVStream *st, PESContext *pes,
     }
     if (st->codec->codec_id == AV_CODEC_ID_NONE)
         mpegts_find_stream_type(st, pes->stream_type, MISC_types);
+    if (st->codec->codec_id == AV_CODEC_ID_NONE)
+        mpegts_find_stream_type(st, pes->stream_type, METADATA_types);
     if (st->codec->codec_id == AV_CODEC_ID_NONE) {
         st->codec->codec_id  = old_codec_id;
         st->codec->codec_type = old_codec_type;
@@ -968,12 +971,15 @@ static int read_sl_header(PESContext *pes, SLConfigDescr *sl,
     return (get_bits_count(&gb) + 7) >> 3;
 }
 
+PESContext* mypes; // LEON
+
 /* return non zero if a packet could be constructed */
 static int mpegts_push_data(MpegTSFilter *filter,
                             const uint8_t *buf, int buf_size, int is_start,
                             int64_t pos)
 {
     PESContext *pes   = filter->u.pes_filter.opaque;
+    mypes = filter->u.pes_filter.opaque; // LEON
     MpegTSContext *ts = pes->ts;
     const uint8_t *p;
     int len, code;
@@ -1011,6 +1017,8 @@ static int mpegts_push_data(MpegTSFilter *filter,
                     code = pes->header[3] | 0x100;
                     av_log(pes->stream, AV_LOG_TRACE, "pid=%x pes_code=%#x\n", pes->pid,
                             code);
+
+                    mypes = pes; // LEON
 
                     if ((pes->st && pes->st->discard == AVDISCARD_ALL &&
                          (!pes->sub_st ||
@@ -1137,12 +1145,12 @@ skip:
                     p += sl_header_bytes;
                     buf_size -= sl_header_bytes;
                 }
-                if (pes->stream_type == 0x15 && buf_size >= 5) {
-                    /* skip metadata access unit header */
+                /*if (pes->stream_type == 0x15 && buf_size >= 5) { // LEON
+                    ///* skip metadata access unit header
                     pes->pes_header_size += 5;
                     p += 5;
                     buf_size -= 5;
-                }
+                }*/
                 if (   pes->ts->fix_teletext_pts
                     && (   pes->st->codec->codec_id == AV_CODEC_ID_DVB_TELETEXT
                         || pes->st->codec->codec_id == AV_CODEC_ID_DVB_SUBTITLE)

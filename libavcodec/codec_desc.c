@@ -2792,6 +2792,12 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .name      = "klv",
         .long_name = NULL_IF_CONFIG_SMALL("SMPTE 336M Key-Length-Value (KLV) metadata"),
     },
+    { // LEON
+        .id        = AV_CODEC_ID_VIMS,
+        .type      = AVMEDIA_TYPE_DATA,
+        .name      = "vims",
+        .long_name = NULL_IF_CONFIG_SMALL("Video metadata stream (VIMS)"),
+    },
     {
         .id        = AV_CODEC_ID_DVD_NAV,
         .type      = AVMEDIA_TYPE_DATA,

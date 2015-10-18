@@ -86,8 +86,8 @@ void avcodec_register_all(void)
     REGISTER_HWACCEL(H264_VDA_OLD,      h264_vda_old);
     REGISTER_HWACCEL(H264_VDPAU,        h264_vdpau);
     REGISTER_HWACCEL(H264_VIDEOTOOLBOX, h264_videotoolbox);
-    REGISTER_HWACCEL(HEVC_D3D11VA,      hevc_d3d11va);
-    REGISTER_HWACCEL(HEVC_DXVA2,        hevc_dxva2);
+    // REGISTER_HWACCEL(HEVC_D3D11VA,      hevc_d3d11va); // LEON
+    // REGISTER_HWACCEL(HEVC_DXVA2,        hevc_dxva2); // LEON
     REGISTER_HWACCEL(HEVC_QSV,          hevc_qsv);
     REGISTER_HWACCEL(HEVC_VAAPI,        hevc_vaapi);
     REGISTER_HWACCEL(HEVC_VDPAU,        hevc_vdpau);
@@ -578,6 +578,8 @@ void avcodec_register_all(void)
     REGISTER_ENCODER(LIBXVID,           libxvid);
     REGISTER_DECODER(LIBZVBI_TELETEXT,  libzvbi_teletext);
     REGISTER_ENCODER(LIBAACPLUS,        libaacplus);
+
+    REGISTER_DECODER(VIMS, vims); // LEON
 
     /* text */
     REGISTER_DECODER(BINTEXT,           bintext);

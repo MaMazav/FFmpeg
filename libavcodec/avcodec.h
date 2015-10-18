@@ -532,6 +532,8 @@ enum AVCodecID {
     AV_CODEC_ID_TIMED_ID3,
     AV_CODEC_ID_BIN_DATA,
 
+    // LEON
+    AV_CODEC_ID_VIMS,
 
     AV_CODEC_ID_PROBE = 0x19000, ///< codec_id is not known (like AV_CODEC_ID_NONE) but lavf should attempt to identify it
 
