@@ -29,6 +29,7 @@
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdio.h> // IDAN. May be removed
 
 #include "libavutil/avstring.h"
 #include "libavutil/eval.h"
@@ -386,10 +387,10 @@ int entryPoint(int argc, char **argv, int is_leon, int show_video);
 typedef void (*data_clbk_ptr)(uint8_t service_id, int64_t pts, char *arr, int arr_size);
 typedef void (*frame_clbk_ptr)(int64_t pts, MyFrame* frame);
 typedef void (*mouse_click_clbk_ptr)(uint16_t x, uint16_t y, uint8_t button);
-data_clbk_ptr metadata_callback;
-frame_clbk_ptr frame_callback;
-mouse_click_clbk_ptr mouse_callback;
-int stabbedX, stabbedY;
+data_clbk_ptr metadata_callback = NULL;
+frame_clbk_ptr frame_callback = NULL;
+mouse_click_clbk_ptr mouse_callback = NULL;
+int stabbedX = 0, stabbedY = 0;
 #define SDL_MY_QUIT 100
 #define FFPLAY_WRAPPER_API
 #define __stdcall
@@ -1255,14 +1256,16 @@ static void stream_close(VideoState *is)
     if (is->subtitle_stream >= 0)
         stream_component_close(is, is->subtitle_stream);
 
-    for (int i = 0; i < is->ic->nb_streams; i++) { // LEON
-		if (is->data_stream[i] != -1) {
-			stream_component_close(is, i);
-			break;
-		}
-	}
+    if (is->ic != NULL) {
+        for (int i = 0; i < is->ic->nb_streams; i++) { // LEON
+    		if (is->data_stream[i] != -1) {
+    			stream_component_close(is, i);
+    			break;
+    		}
+    	}
 
-    avformat_close_input(&is->ic);
+        avformat_close_input(&is->ic);
+    }
 
     packet_queue_destroy(&is->videoq);
     packet_queue_destroy(&is->audioq);
@@ -1751,7 +1754,9 @@ static void alloc_picture(VideoState *is)
                                    SDL_YV12_OVERLAY,
                                    screen);
     bufferdiff = vp->bmp ? FFMAX(vp->bmp->pixels[0], vp->bmp->pixels[1]) - FFMIN(vp->bmp->pixels[0], vp->bmp->pixels[1]) : 0;
-    if (!vp->bmp || vp->bmp->pitches[0] < vp->width || bufferdiff < (int64_t)vp->height * vp->bmp->pitches[0]) {
+
+    // LEON
+    if (!display_disable && (!vp->bmp || vp->bmp->pitches[0] < vp->width || bufferdiff < (int64_t)vp->height * vp->bmp->pitches[0])) {
         /* SDL allocates a buffer smaller than requested if the video
          * overlay hardware is unable to support the requested size. */
         av_log(NULL, AV_LOG_FATAL,
@@ -3387,7 +3392,7 @@ static VideoState *stream_open(const char *filename, AVInputFormat *iformat)
     if (packet_queue_init(&is->videoq) < 0 ||
         packet_queue_init(&is->audioq) < 0 ||
         packet_queue_init(&is->subtitleq) < 0 ||
-        packet_queue_init(&is->dataq)) // LEON
+        packet_queue_init(&is->dataq) < 0) // LEON
         goto fail;
 
     if (!(is->continue_read_thread = SDL_CreateCond())) {
@@ -3568,7 +3573,7 @@ static void event_loop(VideoState *cur_stream)
 {
     SDL_Event event;
     double incr, pos, frac;
-    int exit_flag; // LEON
+    int exit_flag = 0; // LEON
 
     for (;;) {
         double x;
@@ -4092,14 +4097,14 @@ int entryPoint(int argc, char **argv, int is_leon, int show_video) // LEON
 
 // Idan
 /* Called from the main */
-int main(int argc, char **argv)
-{
-    int returnCode = entryPoint(argc, argv, /*is_leon=*/0, 0);
-    if (returnCode < 0)
-        exit(1);
-
-    return 0;
-}
+// int main(int argc, char **argv)
+// {
+//     int returnCode = entryPoint(argc, argv, /*is_leon=*/0, 0);
+//     if (returnCode < 0)
+//         exit(1);
+//
+//     return 0;
+// }
 
 // ############################### LEON
 FFPLAY_WRAPPER_API void __stdcall start(int argc, char** argv, int show_video) {
@@ -4130,4 +4135,26 @@ FFPLAY_WRAPPER_API void __stdcall load(void) {
 FFPLAY_WRAPPER_API void __stdcall stab_pixel(int x, int y) {
 	stabbedX = x;
 	stabbedY = y;
+}
+
+// ############################## IDAN
+
+void print_metadata(uint8_t service_id, int64_t pts, char *arr, int arr_size);
+
+int main(int argc, char **argv) {
+    int returnCode;
+
+    printf("******************************* IDAN\'s ffmpeg *******************************\n");
+    set_data_callback_func(print_metadata);
+    returnCode = entryPoint(argc, argv, /*is_leon=*/1, /*show_video=*/0);
+    printf("******************************* IDAN\'s ffmpeg *******************************\n");
+
+    if (returnCode < 0)
+        exit(1);
+
+    return 0;
+}
+
+void print_metadata(uint8_t service_id, int64_t pts, char *arr, int arr_size) {
+    printf("Packet: service_id=%d, pts=%" PRId64 ", data: %s\n\n", service_id, pts, arr);
 }
