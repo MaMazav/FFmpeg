@@ -2465,10 +2465,14 @@ static int data_thread(void *arg)
 	AVPacket* mpkt;
 
 	int		counter = 0;
-	int		pos = 0;
+	int		actualSize = 0;
 	char*	arr = NULL;
 
 	for (;;) {
+        // IDAN
+        int cells = 0;
+        int isLast = 0;
+        int isFirst;
 
 		if ((got_data = decoder_decode_frame(&is->datadec, NULL, NULL)) < 0)
 			break;
@@ -2479,32 +2483,67 @@ static int data_thread(void *arg)
 		if (mpkt == NULL)
 			continue ;
 
+        // IDAN
+        if (mpkt->size < 5)
+        {
+            av_log(NULL, AV_LOG_WARNING, "Too small metadata packet");
+            continue;
+        }
+        isFirst = mpkt->data[2] & 0x80;
+        if (!isFirst)
+        {
+            av_log(NULL, AV_LOG_WARNING, "Non first-cell flag in first AU_Cell header");
+            continue;
+        }
+
 		//printf("%d \t %u \n", mpkt->stream_index, (unsigned long)mpkt->pts);
 
 		counter = 0;
-		pos = 0;
+		actualSize = 0;
 		arr = NULL;
-		// calculating the size of the data without the au_cells
-		while (pos < mpkt->size)
-		{
-			int sec = *(short*)(mpkt->data + pos + 3);
-			counter += sec;
-			pos += 5 + sec;
-		}
 
+		// calculating the size of the data without the au_cells
+		while (actualSize + 5 < mpkt->size && !isLast) // IDAN
+		{
+            int sec;
+            char flags; // IDAN
+
+            // IDAN
+
+            flags = *(mpkt->data + actualSize + 2);
+            isFirst = flags & 0x80;
+            isLast = flags & 0x40;
+            if (cells > 0 && isFirst)
+            {
+                av_log(NULL, AV_LOG_WARNING, "First-cell flag in non-first (%d) AU_Cell header", cells);
+                counter = 0;
+                break;
+            }
+            if (actualSize > mpkt->size) // IDAN
+            {
+                av_log(NULL, AV_LOG_WARNING, "Unmatched AU_Cell sizes: packet size is %d, accumulated AU_Cell size after %d cells is %d\n", mpkt->size, cells, actualSize);
+                counter = 0;
+                break;
+            }
+
+            sec = *(short*)(mpkt->data + actualSize + 3);
+            counter += sec;
+            actualSize += 5 + sec;
+            ++cells;
+		}
 
 		// copying only the data to arr
 		if (counter)
 		{
+            int pos = 0; // IDAN
 			int arr_size = counter;
             int service_id = mpkt->data[0];
             arr_size = counter;
 			arr = malloc(arr_size);
 
-			pos = 0;
 			counter = 0;
 
-			while (pos < mpkt->size)
+			while (pos < actualSize)
 			{
 				unsigned short sec = *(unsigned short*)(mpkt->data + pos + 3);
 
