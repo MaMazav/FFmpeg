@@ -383,6 +383,7 @@ typedef struct {
     //int linesize[AV_NUM_DATA_POINTERS];
     int *linesize;
 } MyFrame;
+int is_in_arr(int* arr, int num, int size);
 int entryPoint(int argc, char **argv, int is_leon, int show_video);
 typedef void (*data_clbk_ptr)(uint8_t service_id, int64_t pts, char *arr, int arr_size);
 typedef void (*frame_clbk_ptr)(int64_t pts, MyFrame* frame);
@@ -3018,6 +3019,18 @@ static int is_realtime(AVFormatContext *s)
     return 0;
 }
 
+// LEON
+int is_in_arr(int* arr, int num, int size)
+{
+	for (int i = 0; i < size; i++)
+	{
+		if (arr[i] == num)
+			return 1;
+	}
+
+	return 0;
+}
+
 /* this thread gets the stream from the disk or the network */
 static int read_thread(void *arg)
 {
@@ -3346,6 +3359,10 @@ static int read_thread(void *arg)
             packet_queue_put(&is->videoq, pkt);
         } else if (pkt->stream_index == is->subtitle_stream && pkt_in_play_range) {
             packet_queue_put(&is->subtitleq, pkt);
+        //else if (pkt->stream_index == is->data_stream && pkt_in_play_range) {
+        } else if (is_in_arr(is->data_stream, pkt->stream_index, ic->nb_streams) && pkt_in_play_range) {
+            // LEON
+            packet_queue_put(&is->dataq, pkt);
         } else {
             av_free_packet(pkt);
         }

@@ -835,7 +835,7 @@ static int mpegts_set_stream_info(AVStream *st, PESContext *pes,
     }
     if (st->codec->codec_id == AV_CODEC_ID_NONE)
         mpegts_find_stream_type(st, pes->stream_type, MISC_types);
-    if (st->codec->codec_id == AV_CODEC_ID_NONE)
+    if (st->codec->codec_id == AV_CODEC_ID_NONE) // LEON
         mpegts_find_stream_type(st, pes->stream_type, METADATA_types);
     if (st->codec->codec_id == AV_CODEC_ID_NONE) {
         st->codec->codec_id  = old_codec_id;
@@ -873,7 +873,8 @@ static void new_pes_packet(PESContext *pes, AVPacket *pkt)
     if (pes->total_size != MAX_PES_PAYLOAD &&
         pes->pes_header_size + pes->data_index != pes->total_size +
         PES_START_SIZE) {
-        av_log(pes->stream, AV_LOG_WARNING, "PES packet size mismatch\n");
+        av_log(pes->stream, AV_LOG_WARNING, "PES packet size mismatch: Header indicates %d, Actual is %d\n",
+            pes->total_size, pes->pes_header_size + pes->data_index - PES_START_SIZE); // IDAN
         pes->flags |= AV_PKT_FLAG_CORRUPT;
     }
     memset(pkt->data + pkt->size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
@@ -1146,7 +1147,7 @@ skip:
                     buf_size -= sl_header_bytes;
                 }
                 /*if (pes->stream_type == 0x15 && buf_size >= 5) { // LEON
-                    ///* skip metadata access unit header
+                    // skip metadata access unit header
                     pes->pes_header_size += 5;
                     p += 5;
                     buf_size -= 5;
