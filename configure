@@ -1521,6 +1521,7 @@ LICENSE_LIST="
 "
 
 PROGRAM_LIST="
+    ffplay_vims_extractor
     ffplay
     ffprobe
     ffserver
