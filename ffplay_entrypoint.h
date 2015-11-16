@@ -1,6 +1,15 @@
+#ifndef FFPLAY_ENTRYPOINT_H
+#define FFPLAY_ENTRYPOINT_H
+
 #include <inttypes.h>
 
-#define FFPLAY_WRAPPER_API
+#ifdef __cplusplus
+#define EXTERNC extern "C"
+#else
+#define EXTERNC
+#endif
+
+#define FFPLAY_WRAPPER_API EXTERNC
 #define __stdcall
 #define __cdecl
 
@@ -27,3 +36,5 @@ FFPLAY_WRAPPER_API void __stdcall load(void);
 FFPLAY_WRAPPER_API void __stdcall stab_pixel(int x, int y);
 
 int entryPoint(int argc, char **argv, int is_leon, int show_video);
+
+#endif /* FFPLAY_ENTRYPOINT_H */

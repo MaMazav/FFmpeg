@@ -14,7 +14,7 @@ vpath %/fate_config.sh.template $(SRC_PATH)
 
 AVPROGS-$(CONFIG_FFMPEG)   += ffmpeg
 AVPROGS-$(CONFIG_FFPLAY)   += ffplay
-AVPROGS-$(CONFIG_FFPLAY_VIMS_EXTRACTOR)   += ffplay_vims_extractor
+AVPROGS-$(CONFIG_LIBFFPLAY_SHARED) += libffplay_shared
 AVPROGS-$(CONFIG_FFPROBE)  += ffprobe
 AVPROGS-$(CONFIG_FFSERVER) += ffserver
 
@@ -22,7 +22,7 @@ AVPROGS    := $(AVPROGS-yes:%=%$(PROGSSUF)$(EXESUF))
 INSTPROGS   = $(AVPROGS-yes:%=%$(PROGSSUF)$(EXESUF))
 PROGS      += $(AVPROGS)
 
-AVBASENAMES  = ffmpeg ffplay_vims_extractor ffplay ffprobe ffserver
+AVBASENAMES  = ffmpeg libffplay_shared ffplay ffprobe ffserver
 ALLAVPROGS   = $(AVBASENAMES:%=%$(PROGSSUF)$(EXESUF))
 ALLAVPROGS_G = $(AVBASENAMES:%=%$(PROGSSUF)_g$(EXESUF))
 
@@ -38,7 +38,9 @@ endif
 OBJS-ffmpeg-$(CONFIG_VIDEOTOOLBOX) += ffmpeg_videotoolbox.o
 OBJS-ffserver                 += ffserver_config.o
 OBJS-ffplay                   += ffplay_entrypoint.o
-OBJS-ffplay_vims_extractor    += ffplay_entrypoint.o
+OBJS-libffplay_shared         += ffplay_entrypoint.o
+
+LDFLAGS-libffplay_shared += -shared -Wl,-soname,libffplay_shared.so
 
 TESTTOOLS   = audiogen videogen rotozoom tiny_psnr tiny_ssim base64
 HOSTPROGS  := $(TESTTOOLS:%=tests/%) doc/print_options

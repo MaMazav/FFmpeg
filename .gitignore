@@ -27,6 +27,7 @@
 /.version
 /ffmpeg
 /ffplay
+/libffplay_shared
 /ffprobe
 /ffserver
 /config.*
@@ -94,3 +95,4 @@
 /tools/seek_print
 /tools/uncoded_frame
 /tools/zmqsend
+/ffplay_vims_extractor
